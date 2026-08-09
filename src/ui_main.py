@@ -166,9 +166,9 @@ class FloatingPanel(QFrame):
         """)
 
         self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(32)
-        self._shadow.setColor(QColor(0, 0, 0, 28))
-        self._shadow.setOffset(0, 8)
+        self._shadow.setBlurRadius(40)
+        self._shadow.setColor(QColor(0, 0, 0, 40))
+        self._shadow.setOffset(0, 12)
         self.setGraphicsEffect(self._shadow)
 
         outer = QVBoxLayout(self)
@@ -238,8 +238,19 @@ class StreamLensUI(QMainWindow):
         self.engine = None
         self._cam_active = False
 
-        app_font = QFont(_FONT_FAMILY, 10)
-        QApplication.setFont(app_font)
+        global _FONT_FAMILY
+        font_path = get_asset("Inter_18pt-Regular.ttf")
+        if os.path.exists(font_path):
+            font_id = QFontDatabase.addApplicationFont(font_path)
+            if font_id != -1:
+                families = QFontDatabase.applicationFontFamilies(font_id)
+                if families:
+                    _FONT_FAMILY = families[0]
+                    print(f"Loaded Font Family: {_FONT_FAMILY}")
+
+        app = QApplication.instance()
+        if app:
+            app.setFont(QFont(_FONT_FAMILY, 10))
 
         self.setWindowTitle("Stream Lens")
         self._apply_native_light_titlebar()
@@ -363,6 +374,12 @@ class StreamLensUI(QMainWindow):
         self.panel_camera.body_layout.addLayout(self.cam_list_layout)
 
         self._populate_cameras()
+
+        self.panel_camera.body_layout.addWidget(_divider())
+        
+        note_lbl = _label("Output: Select 'OBS Virtual Camera' in your apps", 11, 400, CLR_TEXT_LIGHT)
+        note_lbl.setWordWrap(True)
+        self.panel_camera.body_layout.addWidget(note_lbl)
 
         self.panel_camera.body_layout.addWidget(_divider())
         self._toggle_fast_start = self._add_toggle_row(
@@ -712,34 +729,51 @@ class StreamLensUI(QMainWindow):
             if widget_to_remove:
                 widget_to_remove.setParent(None)
 
-        devices = []
+        raw_devices = []
         if FilterGraph:
             try:
-                devices = FilterGraph().get_input_devices()
+                raw_devices = FilterGraph().get_input_devices()
             except Exception:
                 pass
 
-        if not devices:
-            devices = ["Cannot detect cameras"]
+        if not raw_devices:
+            raw_devices = ["Cannot detect cameras"]
+
+        valid_cameras = []
+        for i, name in enumerate(raw_devices):
+            if "obs" in name.lower():
+                continue
+            valid_cameras.append((i, name))
+
+        if not valid_cameras:
+            valid_cameras = [(0, "No valid cameras found")]
 
         # Set active label
         current_idx = self.settings.camera_index
-        if current_idx < len(devices):
-            self.lbl_active_cam.setText(devices[current_idx])
+        active_name = next((n for idx, n in valid_cameras if idx == current_idx), "Unknown Camera")
+        self.lbl_active_cam.setText(active_name)
 
         # Generate clean buttons for each camera
-        for i, name in enumerate(devices):
+        for idx, name in valid_cameras:
             btn = QPushButton(name)
+            
+            is_active = (idx == current_idx)
+            font_weight = "bold" if is_active else "normal"
+            bg_color = "#E5E7EB" if is_active else "transparent"
+            text_color = CLR_TEXT_DARK if is_active else CLR_TEXT_MED
+
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent;
+                    background: {bg_color};
                     border: none;
-                    color: {CLR_TEXT_MED};
+                    color: {text_color};
                     font-family: '{_FONT_FAMILY}';
                     font-size: 13px;
+                    font-weight: {font_weight};
                     text-align: left;
-                    padding: 8px 12px;
-                    border-radius: 6px;
+                    padding: 10px 14px;
+                    border-radius: 8px;
+                    margin: 2px 0px;
                 }}
                 QPushButton:hover {{
                     background: #F3F4F6;
@@ -747,8 +781,8 @@ class StreamLensUI(QMainWindow):
                 }}
             """)
             btn.clicked.connect(
-                lambda checked, idx=i, c_name=name: self._on_camera_selected(
-                    idx, c_name
+                lambda checked, c_idx=idx, c_name=name: self._on_camera_selected(
+                    c_idx, c_name
                 )
             )
             self.cam_list_layout.addWidget(btn)
@@ -764,6 +798,13 @@ class StreamLensUI(QMainWindow):
         if not self._cam_active:
             self._draw_placeholder()
         super().resizeEvent(event)
+
+    def mousePressEvent(self, event):
+        panels = [self.panel_camera, self.panel_transform, self.panel_color]
+        for panel in panels:
+            if panel.isVisible() and not panel.geometry().contains(event.position().toPoint()):
+                panel.hide()
+        super().mousePressEvent(event)
 
     def _toggle_stream(self):
         if self.engine and self.engine.isRunning():

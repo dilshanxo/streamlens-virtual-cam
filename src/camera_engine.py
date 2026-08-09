@@ -30,9 +30,6 @@ class CameraEngine(QThread):
 
         # Pre-allocate processing buffers
         self.output_size = (self.settings.width, self.settings.height)
-        self.rgb_buffer = np.zeros(
-            (self.settings.height, self.settings.width, 3), dtype=np.uint8
-        )
         self.sat_lut = None
         self.last_sat_val = None
         self._update_sat_lut()
@@ -76,7 +73,7 @@ class CameraEngine(QThread):
             return None
 
         # 1. Force MJPG codec for maximum quality & faster decode from hardware
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # type: ignore
 
         # 2. Set resolution
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -161,12 +158,27 @@ class CameraEngine(QThread):
             self.camera_ready.emit()
 
             # --- Virtual Camera Initialization ---
-            with pyvirtualcam.Camera(
-                width=width,
-                height=height,
-                fps=fps,
-            ) as cam:
-                print(f"Virtual Camera Active: {cam.device}")
+            try:
+                # Target OBS Virtual Camera explicitly as it registers as a standard
+                # DirectShow device, preventing issues with sandboxed apps like Chrome/WhatsApp.
+                cam = pyvirtualcam.Camera(
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    fmt=pyvirtualcam.PixelFormat.BGR,
+                    backend="obs"
+                )
+            except Exception as e:
+                print(f"[CameraEngine] Note: Could not init OBS Virtual Camera backend ({e}). Falling back to any available virtual camera...")
+                cam = pyvirtualcam.Camera(
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    fmt=pyvirtualcam.PixelFormat.BGR
+                )
+
+            with cam:
+                print(f"Virtual Camera Active: OBS Virtual Camera (Backend: {cam.backend})")
 
                 while self._run_flag:
                     # Check cap is valid under lock
@@ -198,8 +210,7 @@ class CameraEngine(QThread):
                                 (255, 255, 255),
                                 2
                             )
-                            cv2.cvtColor(placeholder, cv2.COLOR_BGR2RGB, dst=self.rgb_buffer)
-                            cam.send(self.rgb_buffer)
+                            cam.send(placeholder)
                             cam.sleep_until_next_frame()
 
                             # Sleep 2.0s checking run flag
@@ -239,11 +250,13 @@ class CameraEngine(QThread):
                             processed_frame, (target_w, target_h), interpolation=interp
                         )
 
-                    # 3. Virtual Camera Output (Optimized buffer reuse)
-                    cv2.cvtColor(
-                        processed_frame, cv2.COLOR_BGR2RGB, dst=self.rgb_buffer
-                    )
-                    cam.send(self.rgb_buffer)
+                    # 3. Virtual Camera Output
+                    # We initialized pyvirtualcam with BGR format, so we can send the BGR frame directly
+                    # without needing to convert it to RGB, saving CPU cycles.
+                    # Use np.ascontiguousarray to ensure the memory is contiguous before sending,
+                    # which is required by pyvirtualcam to prevent silent crashes or tearing.
+                    out_frame = np.ascontiguousarray(processed_frame)
+                    cam.send(out_frame)
                     cam.sleep_until_next_frame()
 
                     # 4. UI Notification with backpressure & offloaded scaling
@@ -283,7 +296,7 @@ class CameraEngine(QThread):
             brightness = self.settings.brightness
             contrast = self.settings.contrast
             saturation = self.settings.saturation
-            
+
             # Lazily/dynamically update LUT if changed externally (e.g. from tests)
             if self.sat_lut is None or self.last_sat_val != saturation:
                 self.sat_lut = np.clip(
@@ -326,7 +339,7 @@ class CameraEngine(QThread):
 
     def stop(self):
         """Signal the engine to stop. Releases camera to unblock any pending read().
-        
+
         This method is non-blocking — it signals the thread to stop and releases
         the camera device, but does NOT wait for the thread to finish. Use wait()
         after calling stop() if you need to block until the thread exits (e.g. on

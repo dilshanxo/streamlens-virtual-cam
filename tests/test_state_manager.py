@@ -32,6 +32,7 @@ class TestStateManager(unittest.TestCase):
         manager.settings.brightness = 25
         manager.settings.contrast = -15
         manager.settings.flip_horizontal = True
+        manager.settings.fast_start = False
         manager.save_settings()
 
         # Instantiate a new manager reading from the same file
@@ -40,6 +41,7 @@ class TestStateManager(unittest.TestCase):
         self.assertEqual(new_manager.settings.contrast, -15)
         self.assertTrue(new_manager.settings.flip_horizontal)
         self.assertFalse(new_manager.settings.flip_vertical)
+        self.assertFalse(new_manager.settings.fast_start)
 
     def test_update_setting(self):
         # Verify update_setting safely updates in-memory and saves to disk
