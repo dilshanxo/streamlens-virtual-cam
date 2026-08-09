@@ -73,7 +73,7 @@ class CameraEngine(QThread):
             return None
 
         # 1. Force MJPG codec for maximum quality & faster decode from hardware
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # type: ignore
 
         # 2. Set resolution
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -159,37 +159,26 @@ class CameraEngine(QThread):
 
             # --- Virtual Camera Initialization ---
             try:
-                # Target our specific virtual camera device name so that it registers
-                # as a distinct option in Windows DirectShow. This prevents users from
-                # accidentally selecting the physical camera and causing locking conflicts.
+                # Target OBS Virtual Camera explicitly as it registers as a standard
+                # DirectShow device, preventing issues with sandboxed apps like Chrome/WhatsApp.
                 cam = pyvirtualcam.Camera(
                     width=width,
                     height=height,
                     fps=fps,
                     fmt=pyvirtualcam.PixelFormat.BGR,
-                    device="StreamLens Virtual Camera"
+                    backend="obs"
                 )
             except Exception as e:
-                print(f"[CameraEngine] Failed to init 'StreamLens Virtual Camera' device: {e}. Falling back to default OBS Virtual Camera...")
-                try:
-                    cam = pyvirtualcam.Camera(
-                        width=width,
-                        height=height,
-                        fps=fps,
-                        fmt=pyvirtualcam.PixelFormat.BGR,
-                        backend="obs"
-                    )
-                except Exception as e2:
-                    print(f"[CameraEngine] Failed to init OBS Virtual Camera backend: {e2}. Falling back to any available virtual camera...")
-                    cam = pyvirtualcam.Camera(
-                        width=width,
-                        height=height,
-                        fps=fps,
-                        fmt=pyvirtualcam.PixelFormat.BGR
-                    )
+                print(f"[CameraEngine] Note: Could not init OBS Virtual Camera backend ({e}). Falling back to any available virtual camera...")
+                cam = pyvirtualcam.Camera(
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    fmt=pyvirtualcam.PixelFormat.BGR
+                )
 
             with cam:
-                print(f"Virtual Camera Active: {cam.device} (Backend: {cam.backend})")
+                print(f"Virtual Camera Active: OBS Virtual Camera (Backend: {cam.backend})")
 
                 while self._run_flag:
                     # Check cap is valid under lock
@@ -307,7 +296,7 @@ class CameraEngine(QThread):
             brightness = self.settings.brightness
             contrast = self.settings.contrast
             saturation = self.settings.saturation
-            
+
             # Lazily/dynamically update LUT if changed externally (e.g. from tests)
             if self.sat_lut is None or self.last_sat_val != saturation:
                 self.sat_lut = np.clip(
@@ -350,7 +339,7 @@ class CameraEngine(QThread):
 
     def stop(self):
         """Signal the engine to stop. Releases camera to unblock any pending read().
-        
+
         This method is non-blocking — it signals the thread to stop and releases
         the camera device, but does NOT wait for the thread to finish. Use wait()
         after calling stop() if you need to block until the thread exits (e.g. on

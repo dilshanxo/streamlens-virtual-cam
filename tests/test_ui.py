@@ -64,6 +64,11 @@ class TestStreamLensUI(unittest.TestCase):
         self.ui.state_manager.flush()
         self.assertAlmostEqual(self.state_manager.settings.zoom_level, 1.5)
 
+        # 4. Fast Camera Start toggle click simulation
+        self.ui._toggle_fast_start.click()
+        self.ui.state_manager.flush()
+        self.assertFalse(self.state_manager.settings.fast_start)
+
     def test_frame_ready_displays_image(self):
         # Create a dummy QImage and pass to _on_frame_ready
         img = QImage(16, 16, QImage.Format.Format_BGR888)

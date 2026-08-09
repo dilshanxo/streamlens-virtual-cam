@@ -14,6 +14,7 @@ class AppSettings:
     width: int = 1280
     height: int = 720
     fps: int = 60
+    fast_start: bool = True
 
 class StateManager:
     def __init__(self, config_path="settings.json"):
@@ -34,7 +35,7 @@ class StateManager:
                 for key, default_val in asdict(default_settings).items():
                     if key in data:
                         val = data[key]
-                        if key in ["flip_horizontal", "flip_vertical"]:
+                        if key in ["flip_horizontal", "flip_vertical", "fast_start"]:
                             validated_data[key] = val if isinstance(val, bool) else default_val
                         elif key == "zoom_level":
                             try:
