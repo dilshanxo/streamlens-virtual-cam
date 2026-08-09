@@ -79,6 +79,7 @@ This script will automatically create a virtual environment, install all require
 ### Option 2: Manual Setup for Developers
 
 **1. Clone & Initialize**
+
 ```bash
 git clone [https://github.com/dilshanxo/streamlens-virtual-cam.git](https://github.com/dilshanxo/streamlens-virtual-cam.git)
 cd streamlens-virtual-cam
