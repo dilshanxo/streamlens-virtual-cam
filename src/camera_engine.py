@@ -30,9 +30,6 @@ class CameraEngine(QThread):
 
         # Pre-allocate processing buffers
         self.output_size = (self.settings.width, self.settings.height)
-        self.rgb_buffer = np.zeros(
-            (self.settings.height, self.settings.width, 3), dtype=np.uint8
-        )
         self.sat_lut = None
         self.last_sat_val = None
         self._update_sat_lut()
@@ -161,12 +158,38 @@ class CameraEngine(QThread):
             self.camera_ready.emit()
 
             # --- Virtual Camera Initialization ---
-            with pyvirtualcam.Camera(
-                width=width,
-                height=height,
-                fps=fps,
-            ) as cam:
-                print(f"Virtual Camera Active: {cam.device}")
+            try:
+                # Target our specific virtual camera device name so that it registers
+                # as a distinct option in Windows DirectShow. This prevents users from
+                # accidentally selecting the physical camera and causing locking conflicts.
+                cam = pyvirtualcam.Camera(
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    fmt=pyvirtualcam.PixelFormat.BGR,
+                    device="StreamLens Virtual Camera"
+                )
+            except Exception as e:
+                print(f"[CameraEngine] Failed to init 'StreamLens Virtual Camera' device: {e}. Falling back to default OBS Virtual Camera...")
+                try:
+                    cam = pyvirtualcam.Camera(
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        fmt=pyvirtualcam.PixelFormat.BGR,
+                        backend="obs"
+                    )
+                except Exception as e2:
+                    print(f"[CameraEngine] Failed to init OBS Virtual Camera backend: {e2}. Falling back to any available virtual camera...")
+                    cam = pyvirtualcam.Camera(
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        fmt=pyvirtualcam.PixelFormat.BGR
+                    )
+
+            with cam:
+                print(f"Virtual Camera Active: {cam.device} (Backend: {cam.backend})")
 
                 while self._run_flag:
                     # Check cap is valid under lock
@@ -198,8 +221,7 @@ class CameraEngine(QThread):
                                 (255, 255, 255),
                                 2
                             )
-                            cv2.cvtColor(placeholder, cv2.COLOR_BGR2RGB, dst=self.rgb_buffer)
-                            cam.send(self.rgb_buffer)
+                            cam.send(placeholder)
                             cam.sleep_until_next_frame()
 
                             # Sleep 2.0s checking run flag
@@ -239,11 +261,13 @@ class CameraEngine(QThread):
                             processed_frame, (target_w, target_h), interpolation=interp
                         )
 
-                    # 3. Virtual Camera Output (Optimized buffer reuse)
-                    cv2.cvtColor(
-                        processed_frame, cv2.COLOR_BGR2RGB, dst=self.rgb_buffer
-                    )
-                    cam.send(self.rgb_buffer)
+                    # 3. Virtual Camera Output
+                    # We initialized pyvirtualcam with BGR format, so we can send the BGR frame directly
+                    # without needing to convert it to RGB, saving CPU cycles.
+                    # Use np.ascontiguousarray to ensure the memory is contiguous before sending,
+                    # which is required by pyvirtualcam to prevent silent crashes or tearing.
+                    out_frame = np.ascontiguousarray(processed_frame)
+                    cam.send(out_frame)
                     cam.sleep_until_next_frame()
 
                     # 4. UI Notification with backpressure & offloaded scaling
